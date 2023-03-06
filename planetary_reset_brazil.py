@@ -63,6 +63,7 @@ display(HTML("<style>.container { width:90% !important; }</style>"))
 gases = ['CO2','CH4','N2O']
 emission_units = {'CO2' : 'Gt','CH4' : 'Mt', 'N2O' : 'Mt'}
 gas_units = {'CO2' : 'ppm','CH4' : 'ppb', 'N2O' : 'ppb'}
+country_of_interest = "Brazil"
 
 
 # ### Utility Functions
@@ -229,6 +230,7 @@ fao_emissions_c_2019 = df.pivot_table(index=['Area','Element'],columns='Item').f
 fao_emissions_c_2019.columns = [c[1] for c in fao_emissions_c_2019.columns]
 fao_emissions_c_2019['Total without agriculture'] = fao_emissions_c_2019['Total emissions with agricultural land use'] - fao_emissions_c_2019['Agriculture and related land use']
 
+print("loaded FAO data")
 
 # # Updating Estimates of Emissions from Animal Agriculture
 
@@ -324,9 +326,7 @@ conversions
 
 # In[17]:
 
-
-
-gleam2 =  pd.read_excel(open("GLEAM/GLEAM_Data_public_release.xlsx", 'rb'),sheet_name = "GLEAM_GRL", skiprows=2)
+gleam2 =  pd.read_excel(open("GLEAM/GLEAM_Data_public_release.xlsx", 'rb'),sheet_name = "GLEAM_GRL", skiprows=2, engine='openpyxl')
 
 # harmonize  names
 
@@ -367,7 +367,7 @@ for c in df:
 # In[18]:
 
 
-gleam2_c = pd.read_excel(open("GLEAM/GLEAM_Data_public_release.xlsx", 'rb'),sheet_name = "COUNTRY_LIST", index_col=None, header=None, names=["Country"])
+gleam2_c = pd.read_excel(open("GLEAM/GLEAM_Data_public_release.xlsx", 'rb'),sheet_name = "COUNTRY_LIST", index_col=None, header=None, names=["Country"], engine='openpyxl')
 
 data = []
 region = ""
@@ -390,6 +390,7 @@ gleam2c_countries = gleam2c['Country Mapped'].unique()
 gleam2c = gleam2c[['Country Mapped','Species', 'System', 'Commodity', 'EI_CO2_perkg', 'EI_CH4_perkg', 'EI_N2O_perkg']]
 gleam2c.columns = ['Area','Species', 'System', 'Product', 'EI_CO2_perkg', 'EI_CH4_perkg', 'EI_N2O_perkg']
 
+print("Updated emiisions")
 
 # ### FAO Livestock Production and Trade Data
 
@@ -432,9 +433,8 @@ fao_production_categories[fao_production_categories.Item.isin(fao_livestock_prim
 
 datafile = "FAOSTAT/Filtered/Trade_Crops_Livestock_E_All_Data_(Normalized).csv"
 
-fao_livestock_trade = pd.read_csv(datafile,encoding = "latin_1")
-    
-year = np.max(fao_livestock_trade.Year.values)
+fao_livestock_trade = pd.read_csv(datafile)
+year = np.nanmax(fao_livestock_trade.Year.values)
 fao_livestock_trade = fao_livestock_trade[
         (fao_livestock_trade.Area.isin(fao_countries)) 
         & (fao_livestock_trade.Year == year) 
@@ -614,6 +614,7 @@ for gas in gases:
 for gas in gases:
     constants.loc['Emissions|Livestock|%s' % gas] = [livestock_data.sum(numeric_only=True)['Emissions|%s|Livestock' % gas],emission_units[gas]]
 
+print("Sorted livestock")
 
 # In[32]:
 
@@ -691,6 +692,7 @@ livestock_data['Land Use'] = livestock_data['Land Use|Domestic'] + livestock_dat
 
 constants.loc['Land Use|Livestock'] = [livestock_data.sum(numeric_only=True)['Land Use'],'km^2']
 
+print("About to start replacement diets")
 
 # In[38]:
 
@@ -998,6 +1000,7 @@ for gas in gases:
 for gas in gases:
     livestock_data['Emissions|%s|Crops|Xu' % gas ] = xu_plant_emissions[gas]
 
+print("Saving livestock data")
 
 # In[70]:
 
@@ -1047,6 +1050,7 @@ livestock_data_sumcols = ['Export Quantity','Import Quantity', 'Consumption',
 
 # In[72]:
 
+print("Replacement diets sorted: cehck output")
 
 livestock_data.to_csv("Outputs/country_livestock_data.csv",index=False)
 
@@ -1229,6 +1233,11 @@ def RF_MAGICC_CORR(C,M,N):
 # Simplify columns for clarity
 
 
+# extract country of interest
+livestock_data_coi = livestock_data[livestock_data["Area"] == country_of_interest]
+# now drop that country from the main data
+livestock_data = livestock_data.drop(livestock_data[livestock_data["Area"] == country_of_interest].index)
+
 # TF = Total Emissions FAO
 # using total w/out agricultural land change since we are assuming base land use is constant 
 
@@ -1240,10 +1249,14 @@ fao_emissions_2019['Model:AF'] = fao_emissions_2019['Agriculture total']
 # N = non agricultural emissions
 fao_emissions_2019['Model:NF'] = fao_emissions_2019['Model:TF'] - fao_emissions_2019['Model:AF']
 
+#livestock_data.sum() takes ages. And it's done a lot, just to extract a column
+# so calculate once, then we can just use it.
+livestock_data_sum = livestock_data_coi.sum(numeric_only=True)
+
 # L = livestock
-fao_emissions_2019.loc['CO2 emissions','Model:LF'] = livestock_data.sum()['Emissions|CO2|Livestock'] 
-fao_emissions_2019.loc['CH4 emissions','Model:LF'] = livestock_data.sum()['Emissions|CH4|Livestock'] 
-fao_emissions_2019.loc['N2O emissions','Model:LF'] = livestock_data.sum()['Emissions|N2O|Livestock']
+fao_emissions_2019.loc['CO2 emissions','Model:LF'] = livestock_data_sum['Emissions|CO2|Livestock']
+fao_emissions_2019.loc['CH4 emissions','Model:LF'] = livestock_data_sum['Emissions|CH4|Livestock'] 
+fao_emissions_2019.loc['N2O emissions','Model:LF'] = livestock_data_sum['Emissions|N2O|Livestock']
 
 # C = crops
 fao_emissions_2019['Model:CF'] = fao_emissions_2019['Model:AF'] - fao_emissions_2019['Model:LF']
@@ -1265,28 +1278,34 @@ fao_emissions_2019['Model:NX'] = fao_emissions_2019['Model:TF'] - fao_emissions_
 
 # SR = soy replacement
 
-fao_emissions_2019.loc['CO2 emissions','Model:SR'] = livestock_data.sum()['Emissions|CO2|Soy Replacement']  
-fao_emissions_2019.loc['CH4 emissions','Model:SR'] = livestock_data.sum()['Emissions|CH4|Soy Replacement'] 
-fao_emissions_2019.loc['N2O emissions','Model:SR'] = livestock_data.sum()['Emissions|N2O|Soy Replacement'] 
+fao_emissions_2019.loc['CO2 emissions','Model:SR'] = livestock_data_sum['Emissions|CO2|Soy Replacement']  
+fao_emissions_2019.loc['CH4 emissions','Model:SR'] = livestock_data_sum['Emissions|CH4|Soy Replacement'] 
+fao_emissions_2019.loc['N2O emissions','Model:SR'] = livestock_data_sum['Emissions|N2O|Soy Replacement'] 
 
 # CR = crop replacement # data from FAO
 
-fao_emissions_2019.loc['CO2 emissions','Model:CR'] = livestock_data.sum()['Emissions|CO2|Crop Replacement']  
-fao_emissions_2019.loc['CH4 emissions','Model:CR'] = livestock_data.sum()['Emissions|CH4|Crop Replacement'] 
-fao_emissions_2019.loc['N2O emissions','Model:CR'] = livestock_data.sum()['Emissions|N2O|Crop Replacement'] 
+fao_emissions_2019.loc['CO2 emissions','Model:CR'] = livestock_data_sum['Emissions|CO2|Crop Replacement']  
+fao_emissions_2019.loc['CH4 emissions','Model:CR'] = livestock_data_sum['Emissions|CH4|Crop Replacement'] 
+fao_emissions_2019.loc['N2O emissions','Model:CR'] = livestock_data_sum['Emissions|N2O|Crop Replacement'] 
 
 # PR = plant replacement # data from Xu et al (2021)
 
-fao_emissions_2019.loc['CO2 emissions','Model:PR'] = livestock_data.sum()['Emissions|CO2|Xu Plant Replacement']  
-fao_emissions_2019.loc['CH4 emissions','Model:PR'] = livestock_data.sum()['Emissions|CH4|Xu Plant Replacement'] 
-fao_emissions_2019.loc['N2O emissions','Model:PR'] = livestock_data.sum()['Emissions|N2O|Xu Plant Replacement'] 
+fao_emissions_2019.loc['CO2 emissions','Model:PR'] = livestock_data_sum['Emissions|CO2|Xu Plant Replacement']  
+fao_emissions_2019.loc['CH4 emissions','Model:PR'] = livestock_data_sum['Emissions|CH4|Xu Plant Replacement'] 
+fao_emissions_2019.loc['N2O emissions','Model:PR'] = livestock_data_sum['Emissions|N2O|Xu Plant Replacement'] 
 
 # Default is PR
 
 for gas in gases:
     fao_emissions_2019.loc['%s emissions' % gas ,'Model:R'] = fao_emissions_2019.loc['%s emissions' %gas,'Model:PR']
 
+# but we also need base_emissions
+fao_emissions_2019.loc['CO2','Base'] = livestock_data.sum(numeric_only=True)['Emissions|CO2|Livestock']
+fao_emissions_2019.loc['CH4','Base'] = livestock_data.sum(numeric_only=True)['Emissions|CH4|Livestock'] 
+fao_emissions_2019.loc['N2O','Base'] = livestock_data.sum(numeric_only=True)['Emissions|N2O|Livestock']
 
+print(livestock_data_sum)
+print(livestock_data.sum(numeric_only=True))
 
 # In[82]:
 
@@ -1403,8 +1422,9 @@ co2_oc_low = c_oc_low * 44 / 12
 co2_oc_high = c_oc_high * 44 / 12
 co2_oc_nosoil = c_oc_nosoil * 44 / 12
 
-land_use_total = livestock_data.sum()['Land Use']
+land_use_total = livestock_data_sum['Land Use']
 
+print("Modelling done")
 
 # # Scenario Modeling
 
@@ -1426,6 +1446,7 @@ land_use_total = livestock_data.sum()['Land Use']
 
 
 def RunScenarios(emissions,
+                base_emissions,
                 to_Mt = to_Mt,
                 mw = mw,
                 pp_scale = pp_scale,
@@ -1436,11 +1457,12 @@ def RunScenarios(emissions,
                 ):
     concentration = {}
     for gas in gases:
+        be = base_emissions[gas] * to_Mt[gas] * 1.0E12 * (1/mw[gas]) * (1/1.8E11) * pp_scale[gas]
         p = emissions[gas] * to_Mt[gas] * 1.0E12 * (1/mw[gas]) * (1/1.8E11) * pp_scale[gas]
         a = np.zeros(len(emissions[gas]))
         a[0] = pp_start[gas]
         for i in range(1,len(a)):
-            a[i] = a[i-1] * annualdecay[gas] + p[i-1] * to_atm[gas] + nona[gas]
+            a[i] = a[i-1] * annualdecay[gas] + (be + p[i-1]) * to_atm[gas] + nona[gas]
         concentration[gas] = a
     return concentration
 
@@ -1631,7 +1653,7 @@ co2_oc_burnins
 # In[98]:
 
 
-recovered_land = livestock_data.sum()['Land Use|Recovered']
+recovered_land = livestock_data_sum['Land Use|Recovered']
 cr_rat = recovered_land / land_use_total
 
 netzero_gases = ['CO2']
@@ -1721,7 +1743,7 @@ for tag,gas_reduce in [
     scid = 'Phaseout_Breakdown_%s' % tag
     scenario_list.append(scid)
     
-    recovered_land = livestock_data.sum()['Land Use|Recovered']
+    recovered_land = livestock_data_sum['Land Use|Recovered']
     cr_rat = recovered_land / land_use_total
 
     for gas in gases:
@@ -1769,7 +1791,7 @@ crp = 'CO2_30y_recovery_15y_phaseout'
 scid = 'Phaseout|Hayek High'
 scenario_list.append(scid)
 
-recovered_land = livestock_data.sum()['Land Use|Recovered']
+recovered_land = livestock_data_sum['Land Use|Recovered']
 cr_rat = (co2_oc_high / co2_oc) * recovered_land / land_use_total
 
 for gas in gases:
@@ -1783,7 +1805,7 @@ for gas in gases:
 scid = 'Phaseout|Hayek Low'
 scenario_list.append(scid)
 
-recovered_land = livestock_data.sum()['Land Use|Recovered']
+recovered_land = livestock_data_sum['Land Use|Recovered']
 cr_rat = (co2_oc_low / co2_oc) * recovered_land / land_use_total
 
 for gas in gases:
@@ -1797,7 +1819,7 @@ for gas in gases:
 scid = 'Phaseout|Hayek No Soil'
 scenario_list.append(scid)
 
-recovered_land = livestock_data.sum()['Land Use|Recovered']
+recovered_land = livestock_data_sum['Land Use|Recovered']
 cr_rat = (co2_oc_nosoil / co2_oc) * recovered_land / land_use_total
 
 for gas in gases:
@@ -1823,8 +1845,8 @@ for group in groups:
     aap = 'aa_exponential_phaseout_00y'
     crp = 'CO2_30y_recovery_00y_phaseout'
     
-    dfs = livestock_data[livestock_data.Category.isin(groups[group])].sum(numeric_only=True,axis=0)
-    lu_frac = dfs['Land Use|Recovered'] / livestock_data.sum()['Land Use']
+    dfs = livestock_data_coi[livestock_data_coi.Category.isin(groups[group])].sum(numeric_only=True,axis=0)
+    lu_frac = dfs['Land Use|Recovered'] / livestock_data_sum['Land Use']
     
     scid = 'Elimination|%s' % group
     scenario_list.append(scid)
@@ -1924,10 +1946,12 @@ passed = []
 
 for scen in scenario_list:
         em = {}
+        bem = {}
         for gas in gases:
             em[gas] = scenarios['Emissions|%s|%s' % (gas,scen)].fillna(0).values
+            bem[gas] = fao_emissions_2019.loc[gas]['Base']
 
-        p = RunScenarios(em)
+        p = RunScenarios(em, bem)
         for gas in gases:
             scenarios['Concentration|%s|%s' % (gas,scen)] = p[gas]
 
@@ -1953,6 +1977,8 @@ for scen in scenario_list:
         scenarios['RFDCY|%s' % scen] =  scenarios['RFCY|%s' % scen] -  scenarios['RFCY|BAU']
         scenarios['CRFDCY|%s' % scen] = np.cumsum(scenarios['RFDCY|%s' % scen].values) 
 
+
+print("Scenarios run")
 
 
 # ## Calibration Scenarios
@@ -2021,10 +2047,12 @@ with np.errstate(divide='ignore',invalid='ignore'):
 
     for scen in calib_scenario_list:
         em = {}
+        bem = {}
         for gas in gases:
             em[gas] = calib_scenarios['Emissions|%s|%s' % (gas,scen)]
+            bem[gas] = fao_emissions_2019.loc[gas]['Base']
 
-        p = RunScenarios(em)
+        p = RunScenarios(em, bem)
         for gas in gases:
             calib_scenarios['Concentration|%s|%s' % (gas,scen)] = p[gas]
 
@@ -2149,6 +2177,7 @@ for scen in calib_scenario_list:
     calib_scenarios['ACO2EQC|%s' % scen] = compute_aco2eqc(calib_scenarios['CRFCD|%s' % scen]) 
     calib_scenarios['COCC|%s' % scen] = (calib_scenarios.index - 2021) * calib_scenarios['ACO2EQC|%s' % scen]    
 
+print("Scenarions calibrated")
 
 # 
 # 
@@ -2276,8 +2305,7 @@ diet_countries = country_group[country_group['Country Group'] == "OECD"].Country
 
 # In[117]:
 
-
-pop = pd.read_csv("FAOSTAT/Filtered/Population_E_All_Data_(Normalized).csv")
+pop = pd.read_csv("FAOSTAT/Filtered/Population_E_All_Data_(Normalized).csv",encoding = 'latin-1')
 
 diet_pop = pop[(pop.Year == 2018) & (pop.Area.isin(diet_countries))].groupby('Element').sum().loc['Total Population - Both sexes']['Value'] * 1000
 diet_pop_landuse = livestock_data[livestock_data.Area.isin(diet_countries)].sum(numeric_only=True)['Land Use']
@@ -2290,6 +2318,7 @@ print ("If world had OECD diet an additional %.2f Mkm^2 of land would be needed 
 
 extra_land_use = scaled_land_use - world_pop_landuse
 
+print("Done")
 
 # ###  Table 1
 
@@ -2824,6 +2853,7 @@ soybean_ha = 120501628
 land_ha = 13003000000
 print ("%.2f %.5f" % (soybean_protein / livestock_protein, soybean_ha/land_ha))
 
+print("just about to plot")
 
 # In[ ]:
 
@@ -2862,7 +2892,7 @@ plt.rc('axes',titlesize=10)
 
 
 fignum = 1
-pdffile = "Figures/Figure%d.pdf" % fignum
+pdffile = "Figures_Brazil/Figure%d.pdf" % fignum
 
 
 with PdfPages(pdffile) as pdf:    
@@ -2889,7 +2919,7 @@ with PdfPages(pdffile) as pdf:
     plot_species = ['cattle','buffalo','sheep','goats','pigs','poultry']
     plot_meat = np.array([
         df.loc['cattle_meat'].Emissions,
-        df.loc['buffalo_meat'].Emissions,
+        0,#df.loc['buffalo_meat'].Emissions,
         df.loc['sheep_meat'].Emissions,
         df.loc['goat_meat'].Emissions,
         df.loc['pig_meat'].Emissions,
@@ -2898,8 +2928,8 @@ with PdfPages(pdffile) as pdf:
 
     plot_milk = np.array([
         df.loc['cow_milk'].Emissions,
-        df.loc['buffalo_milk'].Emissions,
-        df.loc['sheep_milk'].Emissions,
+        0,#df.loc['buffalo_milk'].Emissions,
+        0,#df.loc['sheep_milk'].Emissions,
         df.loc['goat_milk'].Emissions,
         0,
         0,
@@ -2933,7 +2963,7 @@ with PdfPages(pdffile) as pdf:
     plot_species = ['cattle','buffalo','sheep','goats','pigs','poultry']
     plot_meat = np.array([
         df.loc['cattle_meat']['Land Use'],
-        df.loc['buffalo_meat']['Land Use'],
+        0,#df.loc['buffalo_meat']['Land Use'],
         df.loc['sheep_meat']['Land Use'],
         df.loc['goat_meat']['Land Use'],
         df.loc['pig_meat']['Land Use'],
@@ -2942,8 +2972,8 @@ with PdfPages(pdffile) as pdf:
 
     plot_milk = np.array([
         df.loc['cow_milk']['Land Use'],
-        df.loc['buffalo_milk']['Land Use'],
-        df.loc['sheep_milk']['Land Use'],
+        0,#df.loc['buffalo_milk']['Land Use'],
+        0,#df.loc['sheep_milk']['Land Use'],
         df.loc['goat_milk']['Land Use'],
         0,
         0,
@@ -2988,15 +3018,11 @@ production data from FAOSTAT for 2019 and species and product specific land use 
     #plt.savefig(pdffile.replace('pdf','png'),dpi=300)
     
 
-
-# ### Figure 1-S1 - Animal Ag Emissions and Gas and Species
-
-# In[170]:
-
+"""### Figure 1-S1 - Animal Ag Emissions and Gas and Species"""
 
 fignum = 1
 supnum = 1
-pdffile = "Figures_Supplements/Figure%d-S%d.pdf" % (fignum,supnum)
+pdffile = "Figures_Brazil/Figure%d-S%d.pdf" % (fignum,supnum)
 
 with PdfPages(pdffile) as pdf:    
     
@@ -3023,7 +3049,7 @@ with PdfPages(pdffile) as pdf:
 
     plot_meat = np.array([
         df.loc['cattle_meat'][c],
-        df.loc['buffalo_meat'][c],
+        0,#df.loc['buffalo_meat'][c],
         df.loc['sheep_meat'][c],
         df.loc['goat_meat'][c],
         df.loc['pig_meat'][c],
@@ -3032,8 +3058,8 @@ with PdfPages(pdffile) as pdf:
 
     plot_milk = np.array([
         df.loc['cow_milk'][c],
-        df.loc['buffalo_milk'][c],
-        df.loc['sheep_milk'][c],
+        0,#df.loc['buffalo_milk'][c],
+        0,#df.loc['sheep_milk'][c],
         df.loc['goat_milk'][c],
         0,
         0,
@@ -3066,7 +3092,7 @@ with PdfPages(pdffile) as pdf:
 
     plot_meat = np.array([
         df.loc['cattle_meat'][c],
-        df.loc['buffalo_meat'][c],
+        0,#df.loc['buffalo_meat'][c],
         df.loc['sheep_meat'][c],
         df.loc['goat_meat'][c],
         df.loc['pig_meat'][c],
@@ -3075,8 +3101,8 @@ with PdfPages(pdffile) as pdf:
 
     plot_milk = np.array([
         df.loc['cow_milk'][c],
-        df.loc['buffalo_milk'][c],
-        df.loc['sheep_milk'][c],
+        0,#df.loc['buffalo_milk'][c],
+        0,#df.loc['sheep_milk'][c],
         df.loc['goat_milk'][c],
         0,
         0,
@@ -3110,7 +3136,7 @@ with PdfPages(pdffile) as pdf:
 
     plot_meat = np.array([
         df.loc['cattle_meat'][c],
-        df.loc['buffalo_meat'][c],
+        0,#df.loc['buffalo_meat'][c],
         df.loc['sheep_meat'][c],
         df.loc['goat_meat'][c],
         df.loc['pig_meat'][c],
@@ -3119,8 +3145,8 @@ with PdfPages(pdffile) as pdf:
 
     plot_milk = np.array([
         df.loc['cow_milk'][c],
-        df.loc['buffalo_milk'][c],
-        df.loc['sheep_milk'][c],
+        0,#df.loc['buffalo_milk'][c],
+        0,#df.loc['sheep_milk'][c],
         df.loc['goat_milk'][c],
         0,
         0,
@@ -3172,7 +3198,7 @@ GLEAM (MacLeod et al., 2018).'''
 
 def Figure2(plotname,plotlabel,plotcaption,scen,scenlabel,scen2="",scen2label=""):
 
-    pdffile = "Figures/%s.pdf" % plotname
+    pdffile = "Figures_Brazil/%s.pdf" % plotname
 
     with PdfPages(pdffile) as pdf:    
 
@@ -3333,7 +3359,7 @@ Figure2(plotname,plotlabel,plotcaption,scen,scenlabel)
 
 def EmLeRF_plot(plotname,plotlabel,plotcaption,scen,scenlabel,scen2="",scen2label=""):
 
-    pdffile = "Figures_Supplements/%s.pdf" % plotname
+    pdffile = "Figures_Brazil/%s.pdf" % plotname
 
     with PdfPages(pdffile) as pdf:    
 
@@ -3562,7 +3588,7 @@ replacement, and FAO animal ag emissions) are given.'''
 
 
 fignum = 3
-pdffile = "Figures/Figure%d.pdf" % fignum
+pdffile = "Figures_Brazil/Figure%d.pdf" % fignum
 
 with PdfPages(pdffile) as pdf:    
     
@@ -3630,7 +3656,7 @@ CO2, CH4 and N2O as described in text.'''
 
 fignum = 3
 supnum = 1
-pdffile = "Figures_Supplements/Figure%d-S%d.pdf" % (fignum,supnum)
+pdffile = "Figures_Brazil/Figure%d-S%d.pdf" % (fignum,supnum)
 
 with PdfPages(pdffile) as pdf:    
     
@@ -3761,7 +3787,7 @@ CO2, CH4 and N2O as described in text.'''
 proj_end = scenarios.loc[2100]
 fignum = 4
 
-pdffile = "Figures/Figure%d.pdf" % fignum
+pdffile = "Figures_Brazil/Figure%d.pdf" % fignum
 
 with PdfPages(pdffile) as pdf:    
     
@@ -4053,7 +4079,7 @@ linear regression on MAGICC6 output downloaded from the SSP database.'''
 
 fignum = 5
 
-pdffile = "Figures/Figure%d.pdf" % fignum
+pdffile = "Figures_Brazil/Figure%d.pdf" % fignum
 
 with PdfPages(pdffile) as pdf: 
 
@@ -4429,7 +4455,7 @@ reaching a maximum around 2060 when biomass recovery peaks.'''
 
 
 fignum = 6
-pdffile = "Figures/Figure%d.pdf" % fignum
+pdffile = "Figures_Brazil/Figure%d.pdf" % fignum
 
 with PdfPages(pdffile) as pdf:    
     
@@ -4877,7 +4903,7 @@ For (B) and (C) we also convert the values to driving equivalents, assuming cars
 
 
 fignum = 7
-pdffile = "Figures/Figure%d.pdf" % fignum
+pdffile = "Figures_Brazil/Figure%d.pdf" % fignum
 
 with PdfPages(pdffile) as pdf:    
     df = scenarios.loc[2020:2100]
@@ -5057,7 +5083,7 @@ dfp['SSP-TARGET'] = dfp.Scenario.apply(lambda x: x.split('-')[1])
 
 
 fignum = 8
-pdffile = "Figures/Figure%d.pdf" % fignum
+pdffile = "Figures_Brazil/Figure%d.pdf" % fignum
 
 with PdfPages(pdffile) as pdf:    
     
@@ -5118,6 +5144,11 @@ in contrast to the complete elimination we propose here.'''
         
     pdf.savefig()
     #plt.savefig(pdffile.replace('pdf','png'),dpi=300)
+
+
+
+
+
 
 
 
